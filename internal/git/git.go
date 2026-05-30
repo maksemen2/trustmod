@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/maksemen2/trustmod/internal/command"
+	"github.com/maksemen2/trustmod/internal/pathutil"
 )
 
 func InsideWorktree(ctx context.Context, dir string) bool {
@@ -25,26 +26,33 @@ func WorktreeRoot(ctx context.Context, dir string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.FromSlash(strings.TrimSpace(out)), nil
+	return pathutil.CleanAbs(filepath.FromSlash(strings.TrimSpace(out))), nil
 }
 
 func RelativePath(ctx context.Context, worktreeRoot, path string) (string, error) {
-	absRoot, err := filepath.Abs(worktreeRoot)
-	if err != nil {
-		return "", err
+	if prefix, err := WorktreePrefix(ctx, path); err == nil {
+		return prefix, nil
 	}
-	absPath, err := filepath.Abs(path)
-	if err != nil {
-		return "", err
-	}
-	rel, err := filepath.Rel(absRoot, absPath)
-	if err != nil {
-		return "", err
+	rel, ok := pathutil.RelativeInside(worktreeRoot, path)
+	if !ok {
+		return "", fmt.Errorf("%s is outside git worktree %s", path, worktreeRoot)
 	}
 	if rel == "." {
 		return "", nil
 	}
 	return filepath.ToSlash(rel), nil
+}
+
+func WorktreePrefix(ctx context.Context, dir string) (string, error) {
+	out, err := run(ctx, dir, 5*time.Second, "rev-parse", "--show-prefix")
+	if err != nil {
+		return "", err
+	}
+	prefix := strings.Trim(strings.TrimSpace(out), "/")
+	if prefix == "" {
+		return "", nil
+	}
+	return filepath.ToSlash(filepath.Clean(filepath.FromSlash(prefix))), nil
 }
 
 func run(ctx context.Context, dir string, timeout time.Duration, args ...string) (string, error) {

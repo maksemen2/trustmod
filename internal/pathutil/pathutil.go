@@ -14,16 +14,16 @@ func CleanAbs(path string) string {
 	if err != nil {
 		return filepath.Clean(path)
 	}
-	return filepath.Clean(abs)
+	return resolveExistingAbs(abs)
 }
 
 func RelativeInside(root, path string) (string, bool) {
-	rootAbs, err := filepath.Abs(root)
-	if err != nil {
+	rootAbs := CleanAbs(root)
+	if rootAbs == "" {
 		return "", false
 	}
-	pathAbs, err := filepath.Abs(path)
-	if err != nil {
+	pathAbs := CleanAbs(path)
+	if pathAbs == "" {
 		return "", false
 	}
 	rel, err := filepath.Rel(rootAbs, pathAbs)
@@ -37,6 +37,27 @@ func RelativeInside(root, path string) (string, bool) {
 		return "", false
 	}
 	return rel, true
+}
+
+func resolveExistingAbs(path string) string {
+	clean := filepath.Clean(path)
+	if resolved, err := filepath.EvalSymlinks(clean); err == nil {
+		return filepath.Clean(resolved)
+	}
+	var suffix []string
+	for current := clean; ; current = filepath.Dir(current) {
+		parent := filepath.Dir(current)
+		if parent == current {
+			return clean
+		}
+		suffix = append(suffix, filepath.Base(current))
+		if resolved, err := filepath.EvalSymlinks(parent); err == nil {
+			for i := len(suffix) - 1; i >= 0; i-- {
+				resolved = filepath.Join(resolved, suffix[i])
+			}
+			return filepath.Clean(resolved)
+		}
+	}
 }
 
 func HasPrefix(path, prefix string) bool {

@@ -1,6 +1,7 @@
 package pathutil
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -33,5 +34,22 @@ func TestJoinLabel(t *testing.T) {
 	}
 	if got := JoinLabel("<temp>", filepath.Join("a", "b.txt")); got != "<temp>/a/b.txt" {
 		t.Fatalf("JoinLabel nested = %q", got)
+	}
+}
+
+func TestRelativeInsideResolvesSymlinkedExistingParent(t *testing.T) {
+	root := t.TempDir()
+	realDir := filepath.Join(root, "real")
+	link := filepath.Join(root, "link")
+	if err := os.MkdirAll(filepath.Join(realDir, "service"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(realDir, link); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+
+	rel, ok := RelativeInside(realDir, filepath.Join(link, "service", "go.mod"))
+	if !ok || rel != filepath.Join("service", "go.mod") {
+		t.Fatalf("RelativeInside symlinked child = %q, %v", rel, ok)
 	}
 }
