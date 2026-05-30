@@ -43,6 +43,54 @@ jobs:
       - run: go test ./...
       - run: go install ./cmd/trustmod
 
+  e2e:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+      - name: Build CLI
+        run: |
+          mkdir -p dist
+          go build -o dist/trustmod ./cmd/trustmod
+      - name: Audit benign fixture
+        run: |
+          set -euo pipefail
+          output="$(./dist/trustmod audit --cwd examples/evaluation/benign/http-client --offline --format json --no-color)"
+          grep -q '"verdict": "ALLOW"' <<<"$output"
+          grep -q '"api.example.com"' <<<"$output"
+      - name: Block download-and-execute fixture
+        run: |
+          set -euo pipefail
+          set +e
+          output="$(./dist/trustmod audit --cwd examples/evaluation/malicious/download-exec --offline --format json --no-color 2>&1)"
+          status=$?
+          set -e
+          if [ "$status" -ne 1 ]; then
+            echo "expected exit status 1, got $status"
+            echo "$output"
+            exit 1
+          fi
+          grep -q '"verdict": "BLOCK"' <<<"$output"
+          grep -q '"code": "TM-MAL-002"' <<<"$output"
+      - name: Block secret-exfiltration fixture
+        run: |
+          set -euo pipefail
+          set +e
+          output="$(./dist/trustmod audit --cwd examples/evaluation/malicious/exfiltrate-secret --offline --format json --no-color 2>&1)"
+          status=$?
+          set -e
+          if [ "$status" -ne 1 ]; then
+            echo "expected exit status 1, got $status"
+            echo "$output"
+            exit 1
+          fi
+          grep -q '"verdict": "BLOCK"' <<<"$output"
+          grep -q '"code": "TM-MAL-003"' <<<"$output"
+
   race:
     runs-on: ubuntu-latest
     steps:
