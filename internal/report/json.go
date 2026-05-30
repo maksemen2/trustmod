@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	analyze "github.com/maksemen2/trustmod/internal/model"
@@ -128,19 +129,55 @@ func sanitizeFinding(f *analyze.Finding, redactor pathRedactor) {
 }
 
 type pathRedactor struct {
-	cwd  string
-	home string
-	temp string
+	cwd      string
+	home     string
+	temp     string
+	prefixes []redactionPrefix
+}
+
+type redactionPrefix struct {
+	prefix string
+	label  string
 }
 
 func newPathRedactor() pathRedactor {
 	cwd, _ := os.Getwd()
 	home, _ := os.UserHomeDir()
-	return pathRedactor{
+	p := pathRedactor{
 		cwd:  pathutil.CleanAbs(cwd),
 		home: pathutil.CleanAbs(home),
 		temp: pathutil.CleanAbs(os.TempDir()),
 	}
+	p.prefixes = redactionPrefixes(
+		redactionPrefix{prefix: cwd, label: "."},
+		redactionPrefix{prefix: p.cwd, label: "."},
+		redactionPrefix{prefix: home, label: "~"},
+		redactionPrefix{prefix: p.home, label: "~"},
+		redactionPrefix{prefix: os.TempDir(), label: "<temp>"},
+		redactionPrefix{prefix: p.temp, label: "<temp>"},
+	)
+	return p
+}
+
+func redactionPrefixes(prefixes ...redactionPrefix) []redactionPrefix {
+	seen := map[string]bool{}
+	out := make([]redactionPrefix, 0, len(prefixes))
+	for _, prefix := range prefixes {
+		prefix.prefix = filepath.Clean(strings.TrimSpace(prefix.prefix))
+		if prefix.prefix == "" || prefix.prefix == "." || prefix.label == "" {
+			continue
+		}
+		key := prefix.label + "\x00" + prefix.prefix
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, prefix)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return len(out[i].prefix) > len(out[j].prefix)
+	})
+	return out
 }
 
 func (p pathRedactor) strings(values []string) []string {
@@ -155,9 +192,9 @@ func (p pathRedactor) strings(values []string) []string {
 }
 
 func (p pathRedactor) string(value string) string {
-	value = p.replacePathPrefix(value, p.cwd, ".")
-	value = p.replacePathPrefix(value, p.home, "~")
-	value = p.replacePathPrefix(value, p.temp, "<temp>")
+	for _, prefix := range p.prefixes {
+		value = p.replacePathPrefix(value, prefix.prefix, prefix.label)
+	}
 	return value
 }
 

@@ -130,6 +130,26 @@ func TestJSONProjectRedactsLocalPaths(t *testing.T) {
 	}
 }
 
+func TestPathRedactorStringRedactsAliasPrefix(t *testing.T) {
+	root := t.TempDir()
+	canonicalDir := filepath.Join(root, "canonical-temp")
+	rawDir := filepath.Join(root, "raw-temp")
+	redactor := pathRedactor{
+		temp: filepath.Clean(canonicalDir),
+		prefixes: redactionPrefixes(
+			redactionPrefix{prefix: canonicalDir, label: "<temp>"},
+			redactionPrefix{prefix: rawDir, label: "<temp>"},
+		),
+	}
+	got := redactor.string("go list failed in " + filepath.Join(rawDir, "secret", "go.mod"))
+	if strings.Contains(got, canonicalDir) || strings.Contains(got, rawDir) {
+		t.Fatalf("path alias leaked: %q", got)
+	}
+	if !strings.Contains(filepath.ToSlash(got), "<temp>/secret/go.mod") {
+		t.Fatalf("unexpected redaction: %q", got)
+	}
+}
+
 func TestSARIFUsesCapabilityEvidenceLocations(t *testing.T) {
 	f := findings.New("TM-CAP-001", "example.com/mod", "(main)", "local-static-scan")
 	r := &analyze.ProjectReport{
