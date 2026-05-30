@@ -1,0 +1,14 @@
+version: 1
+profile: strict
+fail_on: [BLOCK, REVIEW]
+thresholds:
+  risk_review: 20
+  risk_block: 80
+  transitive_review: 5
+providers:
+  required: [osv]
+licenses:
+  banned: [AGPL-3.0, GPL-3.0]
+deny:
+  modules:
+    - github.com/google/uuid

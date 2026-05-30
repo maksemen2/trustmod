@@ -1,0 +1,216 @@
+name: trustmod
+description: Review Go dependency risk in pull requests
+author: trustmod contributors
+inputs:
+  command:
+    description: "Command to run: audit, diff, or check"
+    required: false
+    default: diff
+  args:
+    description: Extra trustmod arguments, parsed with shell-style quoting
+    required: false
+    default: ""
+  base:
+    description: Base ref for diff
+    required: false
+    default: main
+  format:
+    description: Report format for stdout
+    required: false
+    default: human
+  policy:
+    description: Policy file path
+    required: false
+    default: ""
+  baseline:
+    description: Baseline file path
+    required: false
+    default: ""
+  rules:
+    description: Custom source rules YAML path
+    required: false
+    default: ""
+  sarif:
+    description: Optional SARIF output path
+    required: false
+    default: ""
+  offline:
+    description: Run in offline mode
+    required: false
+    default: "false"
+  govulncheck:
+    description: Run govulncheck when available
+    required: false
+    default: "false"
+  install-govulncheck:
+    description: Install a pinned govulncheck before running
+    required: false
+    default: "false"
+  govulncheck-version:
+    description: govulncheck module version to install
+    required: false
+    default: latest
+  concurrency:
+    description: Maximum concurrency per analysis phase
+    required: false
+    default: ""
+  timeout:
+    description: Per-command/provider timeout, such as 30s
+    required: false
+    default: ""
+  strict-data:
+    description: Fail when an enabled data provider fails
+    required: false
+    default: "false"
+outputs:
+  exit-code:
+    description: Exit code returned by the primary trustmod command
+    value: ${{ steps.run.outputs['exit-code'] }}
+  sarif-path:
+    description: SARIF file path written by the optional SARIF step
+    value: ${{ steps.sarif.outputs['sarif-path'] }}
+runs:
+  using: composite
+  steps:
+    - name: Install trustmod
+      shell: bash
+      env:
+        GITHUB_ACTION_PATH: ${{ github.action_path }}
+        TRUSTMOD_ACTION_REF: ${{ github.action_ref }}
+      run: |
+        set -euo pipefail
+        cd "$GITHUB_ACTION_PATH"
+        build_date="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        action_commit="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
+        go install -buildvcs=false -ldflags "-s -w -X main.version=${TRUSTMOD_ACTION_REF:-dev} -X main.commit=${action_commit} -X main.date=${build_date}" ./cmd/trustmod
+    - name: Install govulncheck
+      if: inputs.install-govulncheck == 'true'
+      shell: bash
+      env:
+        INPUT_GOVULNCHECK_VERSION: ${{ inputs.govulncheck-version }}
+      run: |
+        set -euo pipefail
+        go install "golang.org/x/vuln/cmd/govulncheck@${INPUT_GOVULNCHECK_VERSION}"
+    - name: Run trustmod
+      id: run
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+        INPUT_ARGS: ${{ inputs.args }}
+        INPUT_BASE: ${{ inputs.base }}
+        INPUT_BASELINE: ${{ inputs.baseline }}
+        INPUT_COMMAND: ${{ inputs.command }}
+        INPUT_CONCURRENCY: ${{ inputs.concurrency }}
+        INPUT_FORMAT: ${{ inputs.format }}
+        INPUT_GOVULNCHECK: ${{ inputs.govulncheck }}
+        INPUT_OFFLINE: ${{ inputs.offline }}
+        INPUT_POLICY: ${{ inputs.policy }}
+        INPUT_RULES: ${{ inputs.rules }}
+        INPUT_STRICT_DATA: ${{ inputs.strict-data }}
+        INPUT_TIMEOUT: ${{ inputs.timeout }}
+      run: |
+        set -euo pipefail
+        FLAGS=()
+        EXTRA_ARGS=()
+        parse_extra_args() {
+          if [ -z "$INPUT_ARGS" ]; then return 0; fi
+          local python_bin
+          python_bin="$(command -v python3 || command -v python)"
+          while IFS= read -r arg; do
+            EXTRA_ARGS+=("$arg")
+          done < <("$python_bin" -c 'import os, shlex; [print(arg) for arg in shlex.split(os.environ.get("INPUT_ARGS", ""))]')
+        }
+        if [ "$INPUT_OFFLINE" = "true" ]; then FLAGS+=(--offline); fi
+        if [ "$INPUT_STRICT_DATA" = "true" ]; then FLAGS+=(--strict-data); fi
+        if [ "$INPUT_GOVULNCHECK" = "true" ]; then FLAGS+=(--govulncheck); fi
+        if [ -n "$INPUT_POLICY" ]; then FLAGS+=(--policy "$INPUT_POLICY"); fi
+        if [ -n "$INPUT_BASELINE" ]; then FLAGS+=(--baseline "$INPUT_BASELINE"); fi
+        if [ -n "$INPUT_RULES" ]; then FLAGS+=(--rules "$INPUT_RULES"); fi
+        if [ -n "$INPUT_CONCURRENCY" ]; then FLAGS+=(--concurrency "$INPUT_CONCURRENCY"); fi
+        if [ -n "$INPUT_TIMEOUT" ]; then FLAGS+=(--timeout "$INPUT_TIMEOUT"); fi
+        parse_extra_args
+        set +e
+        case "$INPUT_COMMAND" in
+          diff)
+            trustmod diff --base "$INPUT_BASE" --format "$INPUT_FORMAT" "${FLAGS[@]}" "${EXTRA_ARGS[@]}"
+            status=$?
+            ;;
+          audit)
+            trustmod audit --format "$INPUT_FORMAT" "${FLAGS[@]}" "${EXTRA_ARGS[@]}"
+            status=$?
+            ;;
+          check)
+            trustmod check --format "$INPUT_FORMAT" "${FLAGS[@]}" "${EXTRA_ARGS[@]}"
+            status=$?
+            ;;
+          *)
+            echo "unsupported trustmod command: $INPUT_COMMAND" >&2
+            status=2
+            ;;
+        esac
+        set -e
+        echo "exit-code=$status" >> "$GITHUB_OUTPUT"
+        exit "$status"
+    - name: Emit SARIF
+      id: sarif
+      if: inputs.sarif != '' && always()
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+        INPUT_ARGS: ${{ inputs.args }}
+        INPUT_BASE: ${{ inputs.base }}
+        INPUT_BASELINE: ${{ inputs.baseline }}
+        INPUT_COMMAND: ${{ inputs.command }}
+        INPUT_CONCURRENCY: ${{ inputs.concurrency }}
+        INPUT_GOVULNCHECK: ${{ inputs.govulncheck }}
+        INPUT_OFFLINE: ${{ inputs.offline }}
+        INPUT_POLICY: ${{ inputs.policy }}
+        INPUT_RULES: ${{ inputs.rules }}
+        INPUT_SARIF: ${{ inputs.sarif }}
+        INPUT_STRICT_DATA: ${{ inputs.strict-data }}
+        INPUT_TIMEOUT: ${{ inputs.timeout }}
+      run: |
+        set -euo pipefail
+        FLAGS=()
+        EXTRA_ARGS=()
+        parse_extra_args() {
+          if [ -z "$INPUT_ARGS" ]; then return 0; fi
+          local python_bin
+          python_bin="$(command -v python3 || command -v python)"
+          while IFS= read -r arg; do
+            EXTRA_ARGS+=("$arg")
+          done < <("$python_bin" -c 'import os, shlex; [print(arg) for arg in shlex.split(os.environ.get("INPUT_ARGS", ""))]')
+        }
+        if [ "$INPUT_OFFLINE" = "true" ]; then FLAGS+=(--offline); fi
+        if [ "$INPUT_STRICT_DATA" = "true" ]; then FLAGS+=(--strict-data); fi
+        if [ "$INPUT_GOVULNCHECK" = "true" ]; then FLAGS+=(--govulncheck); fi
+        if [ -n "$INPUT_POLICY" ]; then FLAGS+=(--policy "$INPUT_POLICY"); fi
+        if [ -n "$INPUT_BASELINE" ]; then FLAGS+=(--baseline "$INPUT_BASELINE"); fi
+        if [ -n "$INPUT_RULES" ]; then FLAGS+=(--rules "$INPUT_RULES"); fi
+        if [ -n "$INPUT_CONCURRENCY" ]; then FLAGS+=(--concurrency "$INPUT_CONCURRENCY"); fi
+        if [ -n "$INPUT_TIMEOUT" ]; then FLAGS+=(--timeout "$INPUT_TIMEOUT"); fi
+        parse_extra_args
+        set +e
+        case "$INPUT_COMMAND" in
+          diff)
+            trustmod diff --base "$INPUT_BASE" --format sarif --out "$INPUT_SARIF" "${FLAGS[@]}" "${EXTRA_ARGS[@]}"
+            status=$?
+            ;;
+          audit)
+            trustmod audit --format sarif --out "$INPUT_SARIF" "${FLAGS[@]}" "${EXTRA_ARGS[@]}"
+            status=$?
+            ;;
+          check)
+            trustmod check --format sarif --out "$INPUT_SARIF" "${FLAGS[@]}" "${EXTRA_ARGS[@]}"
+            status=$?
+            ;;
+          *)
+            echo "unsupported trustmod command: $INPUT_COMMAND" >&2
+            status=2
+            ;;
+        esac
+        set -e
+        if [ "$status" -eq 0 ] || [ -s "$INPUT_SARIF" ]; then
+          echo "sarif-path=$INPUT_SARIF" >> "$GITHUB_OUTPUT"
+        fi
+        exit "$status"

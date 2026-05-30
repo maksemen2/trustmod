@@ -1,0 +1,73 @@
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+  go: "1.23"
+  relative-path-mode: cfg
+
+linters:
+  default: none
+  enable:
+    - asciicheck
+    - bodyclose
+    - copyloopvar
+    - errcheck
+    - errorlint
+    - gocritic
+    - gosec
+    - govet
+    - ineffassign
+    - makezero
+    - misspell
+    - nilnesserr
+    - noctx
+    - nolintlint
+    - prealloc
+    - reassign
+    - staticcheck
+    - unconvert
+    - unparam
+    - unused
+    - wastedassign
+    - whitespace
+  settings:
+    errcheck:
+      check-type-assertions: true
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - performance
+        - style
+      disabled-checks:
+        - hugeParam
+        - ifElseChain
+        - unnamedResult
+        - paramTypeCombine
+    gosec:
+      excludes:
+        - G101
+        - G115
+        - G204
+        - G304
+        - G703
+    govet:
+      enable:
+        - shadow
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+    staticcheck:
+      checks:
+        - all
+        - -ST1000
+  exclusions:
+    generated: strict
+
+formatters:
+  enable:
+    - gofmt

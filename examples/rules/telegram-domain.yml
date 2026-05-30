@@ -1,0 +1,14 @@
+version: 1
+rules:
+  - id: org-telegram-api
+    code: TM-CUSTOM-TELEGRAM
+    title: Telegram API access
+    description: The dependency contains a literal Telegram API endpoint.
+    severity: medium
+    verdict: REVIEW
+    confidence: high
+    remediation:
+      - Confirm that outbound Telegram API access is expected for this dependency.
+    match:
+      domains:
+        - telegram.org
